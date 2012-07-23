@@ -25,6 +25,8 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.logging.Logger;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocketFactory;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
@@ -39,7 +41,7 @@ import org.json.JSONObject;
 class IOConnection implements IOCallback {
 	/** Debug logger */
 	static final Logger logger = Logger.getLogger("io.socket");
-	
+
 	public static final String FRAME_DELIMITER = "\ufffd";
 
 	/** The Constant STATE_INIT. */
@@ -67,8 +69,9 @@ class IOConnection implements IOCallback {
 	public static final String SOCKET_IO_1 = "/socket.io/1/";
 
 	/** The SSL socket factory for HTTPS connections */
-	private static SSLSocketFactory sslSocketFactory = (SSLSocketFactory)SSLSocketFactory.getDefault();
-	
+	private static SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory
+			.getDefault();
+
 	/** All available connections. */
 	private static HashMap<String, List<IOConnection>> connections = new HashMap<String, List<IOConnection>>();
 
@@ -148,7 +151,6 @@ class IOConnection implements IOCallback {
 		 */
 		@Override
 		public void run() {
-			setState(STATE_INVALID);
 			error(new SocketIOException(
 					"Timeout Error. No heartbeat from server within life time of the socket. closing.",
 					lastException));
@@ -218,17 +220,17 @@ class IOConnection implements IOCallback {
 			connectTransport();
 		}
 
-
 	};
 
 	/**
 	 * Set the socket factory used for SSL connections.
+	 * 
 	 * @param socketFactory
 	 */
 	public static void setDefaultSSLSocketFactory(SSLSocketFactory socketFactory) {
 		sslSocketFactory = socketFactory;
 	}
-	
+
 	/**
 	 * Creates a new connection or returns the corresponding one.
 	 * 
@@ -263,7 +265,7 @@ class IOConnection implements IOCallback {
 	 * @return true, if successfully registered on this transport, otherwise
 	 *         false.
 	 */
-	public boolean register(SocketIO socket) {
+	public synchronized boolean register(SocketIO socket) {
 		String namespace = socket.getNamespace();
 		if (sockets.containsKey(namespace))
 			return false;
@@ -282,11 +284,11 @@ class IOConnection implements IOCallback {
 	 * @param socket
 	 *            the socket to be shut down
 	 */
-	public void unregister(SocketIO socket) {
+	public synchronized void unregister(SocketIO socket) {
 		sendPlain("0::" + socket.getNamespace());
 		sockets.remove(socket.getNamespace());
 		socket.getCallback().onDisconnect();
-	
+
 		if (sockets.size() == 0) {
 			cleanup();
 		}
@@ -304,18 +306,19 @@ class IOConnection implements IOCallback {
 			setState(STATE_HANDSHAKE);
 			url = new URL(IOConnection.this.url.toString() + SOCKET_IO_1);
 			connection = url.openConnection();
-			if(connection instanceof HttpsURLConnection) {
-				((HttpsURLConnection)connection).setSSLSocketFactory(sslSocketFactory);
+			if (connection instanceof HttpsURLConnection) {
+				((HttpsURLConnection) connection)
+						.setSSLSocketFactory(sslSocketFactory);
 			}
 			connection.setConnectTimeout(connectTimeout);
 			connection.setReadTimeout(connectTimeout);
-	
+
 			/* Setting the request headers */
 			for (Entry<Object, Object> entry : headers.entrySet()) {
 				connection.setRequestProperty((String) entry.getKey(),
 						(String) entry.getValue());
 			}
-	
+
 			InputStream stream = connection.getInputStream();
 			Scanner in = new Scanner(stream);
 			response = in.nextLine();
@@ -332,7 +335,7 @@ class IOConnection implements IOCallback {
 	/**
 	 * Connect transport.
 	 */
-	private void connectTransport() {
+	private synchronized void connectTransport() {
 		if (getState() == STATE_INVALID)
 			return;
 		setState(STATE_CONNECTING);
@@ -425,7 +428,7 @@ class IOConnection implements IOCallback {
 	/**
 	 * Cleanup. IOConnection is not usable after this calling this.
 	 */
-	private void cleanup() {
+	private synchronized void cleanup() {
 		setState(STATE_INVALID);
 		if (transport != null)
 			transport.disconnect();
@@ -504,15 +507,15 @@ class IOConnection implements IOCallback {
 	 * @param message
 	 *            the message
 	 * @return the iO callback
-	 * @throws SocketIOException 
+	 * @throws SocketIOException
 	 */
 	private IOCallback findCallback(IOMessage message) throws SocketIOException {
-		if("".equals(message.getEndpoint()))
+		if ("".equals(message.getEndpoint()))
 			return this;
 		SocketIO socket = sockets.get(message.getEndpoint());
 		if (socket == null) {
-			throw new SocketIOException("Cannot find socket for '" + message.getEndpoint()
-					+ "'");
+			throw new SocketIOException("Cannot find socket for '"
+					+ message.getEndpoint() + "'");
 		}
 		return socket.getCallback();
 	}
@@ -587,28 +590,31 @@ class IOConnection implements IOCallback {
 	}
 
 	/**
-	 * {@link IOTransport} should call this function if it does not support framing. If it does, transportMessage should be used
+	 * {@link IOTransport} should call this function if it does not support
+	 * framing. If it does, transportMessage should be used
 	 * 
 	 * @param text
 	 *            the text
 	 */
 	public void transportData(String text) {
-		if(!text.startsWith(FRAME_DELIMITER)) {
+		if (!text.startsWith(FRAME_DELIMITER)) {
 			transportMessage(text);
 			return;
 		}
-		
-		Iterator<String> fragments = Arrays.asList(text.split(FRAME_DELIMITER)).listIterator(1);
+
+		Iterator<String> fragments = Arrays.asList(text.split(FRAME_DELIMITER))
+				.listIterator(1);
 		while (fragments.hasNext()) {
 			int length = Integer.parseInt(fragments.next());
 			String string = (String) fragments.next();
-			// Potential BUG: it is not defined if length is in bytes or characters. Assuming characters.
-			
-			if(length != string.length()) {
+			// Potential BUG: it is not defined if length is in bytes or
+			// characters. Assuming characters.
+
+			if (length != string.length()) {
 				error(new SocketIOException("Garbage from server: " + text));
 				return;
 			}
-			
+
 			transportMessage(string);
 		}
 	}
@@ -701,8 +707,7 @@ class IOConnection implements IOCallback {
 						if (args.isNull(i) == false)
 							argsArray[i] = args.get(i);
 					}
-				}
-				else
+				} else
 					argsArray = new Object[0];
 				String eventName = event.getString("name");
 				try {
@@ -767,20 +772,17 @@ class IOConnection implements IOCallback {
 	 * forces a reconnect. This had become useful on some android devices which
 	 * do not shut down TCP-connections when switching from HSDPA to Wifi
 	 */
-	public void reconnect() {
-		synchronized (this) {
-			if (getState() != STATE_INVALID) {
-				invalidateTransport();
-				setState(STATE_INTERRUPTED);
-				if (reconnectTask != null) {
-					reconnectTask.cancel();
-				}
-				reconnectTask = new ReconnectTask();
-				reconnectScheduler.scheduleReconnect(backgroundTimer, reconnectTask);
+	public synchronized void reconnect() {
+		if (getState() != STATE_INVALID) {
+			invalidateTransport();
+			setState(STATE_INTERRUPTED);
+			if (reconnectTask != null) {
+				reconnectTask.cancel();
 			}
+			reconnectTask = new ReconnectTask();
+			reconnectScheduler.scheduleReconnect(backgroundTimer, reconnectTask);
 		}
 	}
-
 	/**
 	 * Returns the session id. This should be called from a {@link IOTransport}
 	 * 
@@ -892,38 +894,38 @@ class IOConnection implements IOCallback {
 	@Override
 	public void onDisconnect() {
 		SocketIO socket = sockets.get("");
-		if(socket != null)
-			socket.getCallback().onConnect();
+		if (socket != null)
+			socket.getCallback().onDisconnect();
 	}
 
 	@Override
 	public void onConnect() {
 		SocketIO socket = sockets.get("");
-		if(socket != null)
+		if (socket != null)
 			socket.getCallback().onConnect();
 	}
 
 	@Override
 	public void onMessage(String data, IOAcknowledge ack) {
-		for(SocketIO socket : sockets.values())
+		for (SocketIO socket : sockets.values())
 			socket.getCallback().onMessage(data, ack);
 	}
 
 	@Override
 	public void onMessage(JSONObject json, IOAcknowledge ack) {
-		for(SocketIO socket : sockets.values())
+		for (SocketIO socket : sockets.values())
 			socket.getCallback().onMessage(json, ack);
 	}
 
 	@Override
 	public void on(String event, IOAcknowledge ack, Object... args) {
-		for(SocketIO socket : sockets.values())
+		for (SocketIO socket : sockets.values())
 			socket.getCallback().on(event, ack, args);
 	}
 
 	@Override
 	public void onError(SocketIOException socketIOException) {
-		for(SocketIO socket : sockets.values())
+		for (SocketIO socket : sockets.values())
 			socket.getCallback().onError(socketIOException);
 	}
 }
