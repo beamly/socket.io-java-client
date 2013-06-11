@@ -26,6 +26,7 @@ import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.logging.Logger;
 import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -69,8 +70,7 @@ class IOConnection implements IOCallback {
 	public static final String SOCKET_IO_1 = "/socket.io/1/";
 
 	/** The SSL socket factory for HTTPS connections */
-	private static SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory
-			.getDefault();
+	private static SSLContext sslContext = null;
 
 	/** All available connections. */
 	private static HashMap<String, List<IOConnection>> connections = new HashMap<String, List<IOConnection>>();
@@ -151,7 +151,9 @@ class IOConnection implements IOCallback {
 		 */
 		@Override
 		public void run() {
-			error(new SocketIOException("Timeout Error. No heartbeat from server within life time of the socket. closing.", lastException));
+			error(new SocketIOException(
+					"Timeout Error. No heartbeat from server within life time of the socket. closing.",
+					lastException));
 		}
 	}
 
@@ -223,10 +225,19 @@ class IOConnection implements IOCallback {
 	/**
 	 * Set the socket factory used for SSL connections.
 	 * 
-	 * @param socketFactory
+	 * @param sslContext
 	 */
-	public static void setDefaultSSLSocketFactory(SSLSocketFactory socketFactory) {
-		sslSocketFactory = socketFactory;
+	public static void setSslContext(SSLContext sslContext) {
+		IOConnection.sslContext = sslContext;
+	}
+
+	/**
+	 * Get the socket factory used for SSL connections.
+	 * 
+	 * @return socketFactory
+	 */
+	public static SSLContext getSslContext() {
+		return sslContext;
 	}
 
 	/**
@@ -244,9 +255,11 @@ class IOConnection implements IOCallback {
 			list = new LinkedList<IOConnection>();
 			connections.put(origin, list);
 		} else {
-			for (IOConnection connection : list) {
-				if (connection.register(socket))
-					return connection;
+			synchronized (list) {
+				for (IOConnection connection : list) {
+					if (connection.register(socket))
+						return connection;
+				}
 			}
 		}
 
@@ -305,7 +318,7 @@ class IOConnection implements IOCallback {
 			connection = url.openConnection();
 			if (connection instanceof HttpsURLConnection) {
 				((HttpsURLConnection) connection)
-						.setSSLSocketFactory(sslSocketFactory);
+						.setSSLSocketFactory(sslContext.getSocketFactory());
 			}
 			connection.setConnectTimeout(connectTimeout);
 			connection.setReadTimeout(connectTimeout);
@@ -455,19 +468,17 @@ class IOConnection implements IOCallback {
 	 * @param text
 	 *            the Text to be send.
 	 */
-	private void sendPlain(String text) {
-		synchronized (outputBuffer) {
-			if (getState() == STATE_READY)
-				try {
-					logger.info("> " + text);
-					transport.send(text);
-				} catch (Exception e) {
-					logger.info("IOEx: saving");
-					outputBuffer.add(text);
-				}
-			else {
+	private synchronized void sendPlain(String text) {
+		if (getState() == STATE_READY)
+			try {
+				logger.info("> " + text);
+				transport.send(text);
+			} catch (Exception e) {
+				logger.info("IOEx: saving");
 				outputBuffer.add(text);
 			}
+		else {
+			outputBuffer.add(text);
 		}
 	}
 
@@ -483,12 +494,15 @@ class IOConnection implements IOCallback {
 	/**
 	 * Reset timeout.
 	 */
-	private void resetTimeout() {
+	private synchronized void resetTimeout() {
 		if (heartbeatTimeoutTask != null) {
 			heartbeatTimeoutTask.cancel();
 		}
-		heartbeatTimeoutTask = new HearbeatTimeoutTask();
-		backgroundTimer.schedule(heartbeatTimeoutTask, closingTimeout + heartbeatTimeout);
+		if (getState() != STATE_INVALID) {
+			heartbeatTimeoutTask = new HearbeatTimeoutTask();
+			backgroundTimer.schedule(heartbeatTimeoutTask, closingTimeout
+					+ heartbeatTimeout);
+		}
 	}
 
 	/**
@@ -516,7 +530,7 @@ class IOConnection implements IOCallback {
 	 * 
 	 * {@link IOTransport} calls this when a connection is established.
 	 */
-	public void transportConnected() {
+	public synchronized void transportConnected() {
 		setState(STATE_READY);
 
 		boolean isReconnecting = (reconnectTask != null);
@@ -525,34 +539,29 @@ class IOConnection implements IOCallback {
 			reconnectTask = null;
 		}
 		resetTimeout();
-		synchronized (outputBuffer) {
-			if (transport.canSendBulk()) {
-				ConcurrentLinkedQueue<String> outputBuffer = this.outputBuffer;
-				this.outputBuffer = new ConcurrentLinkedQueue<String>();
-				try {
-					// DEBUG
-					String[] texts = outputBuffer.toArray(new String[outputBuffer.size()]);
-					logger.info("Bulk start:");
-					for (String text : texts) {
-						logger.info("> " + text);
-					}
-					logger.info("Bulk end");
-					// DEBUG END
-					transport.sendBulk(texts);
-				} catch (IOException e) {
-					this.outputBuffer = outputBuffer;
+		if (transport.canSendBulk()) {
+			ConcurrentLinkedQueue<String> outputBuffer = this.outputBuffer;
+			this.outputBuffer = new ConcurrentLinkedQueue<String>();
+			try {
+				// DEBUG
+				String[] texts = outputBuffer.toArray(new String[outputBuffer
+						.size()]);
+				logger.info("Bulk start:");
+				for (String text : texts) {
+					logger.info("> " + text);
 				}
-			} else {
-				String text;
-				while ((text = outputBuffer.poll()) != null)
-					sendPlain(text);
+				logger.info("Bulk end");
+				// DEBUG END
+				transport.sendBulk(texts);
+			} catch (IOException e) {
+				this.outputBuffer = outputBuffer;
 			}
-
-			this.keepAliveInQueue = false;
-			if (isReconnecting) {
-				reconnectScheduler.onReconnect();
-			}
+		} else {
+			String text;
+			while ((text = outputBuffer.poll()) != null)
+				sendPlain(text);
 		}
+		this.keepAliveInQueue = false;
 	}
 
 	/**
@@ -757,6 +766,7 @@ class IOConnection implements IOCallback {
 				reconnectTask.cancel();
 			}
 			reconnectTask = new ReconnectTask();
+			backgroundTimer.schedule(reconnectTask, 1000);
 			reconnectScheduler.scheduleReconnect(backgroundTimer, reconnectTask);
 		}
 	}
@@ -850,7 +860,8 @@ class IOConnection implements IOCallback {
 	 *            the new state
 	 */
 	private synchronized void setState(int state) {
-		this.state = state;
+		if (getState() != STATE_INVALID)
+			this.state = state;
 	}
 
 	/**

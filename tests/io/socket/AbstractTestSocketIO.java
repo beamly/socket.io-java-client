@@ -36,7 +36,7 @@ public abstract class AbstractTestSocketIO implements IOCallback {
 	private static final String REQUEST_ACKNOWLEDGE = "requestAcknowledge";
 
 	/** The Constant to the node executable */
-	private final static String NODE = "node";
+	private final static String NODE = "/usr/local/bin/node";
 
 	/** The port of this test, randomly choosed */
 	private int port = -1;
@@ -377,6 +377,15 @@ public abstract class AbstractTestSocketIO implements IOCallback {
 		}
 	}
 
+	@Test(timeout = TIMEOUT)
+	public void sendUtf8() throws Exception {
+		doConnect();
+		socket.emit("fooo", "\uD83C\uDF84");
+		socket.emit("fooo", "🎄");
+		assertEquals("on", takeEvent());
+		doClose();
+	}
+	
 	// END TESTS
 
 	/**
@@ -513,5 +522,4 @@ public abstract class AbstractTestSocketIO implements IOCallback {
 	public int getProxyPort() {
 		return getPort() + (proxy == null ? 0 : 1);
 	}
-
 }

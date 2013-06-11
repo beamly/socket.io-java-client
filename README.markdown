@@ -20,9 +20,23 @@ Features:
 
 __Status:__ Connecting with Websocket is production ready. XHR is in beta.
 
+
 ## How to use
 
 Using socket.io-java-client is quite simple. But lets see:
+
+Checkout and compile the project:
+
+``` bash
+git clone git://github.com/Gottox/socket.io-java-client.git
+cd socket.io-java-client
+ant jar
+mv jar/socketio.jar /path/to/your/libs/project
+```
+
+If you're using ant, change your build.xml to include socketio.jar. If you're eclipse, add the jar to your project buildpath.
+
+Afterwards, you'll be able to use this library: 
 
 ``` java
 
@@ -69,10 +83,10 @@ Using socket.io-java-client is quite simple. But lets see:
 
 ```
 
-For further informations, read the [Javadoc](http://s01.de/~tox/hgexport/socket.io-java-client/).
+For further informations, read the [Javadoc](http://s01.de/hgexport/socket.io-java-client/).
 
- * [Class SocketIO](http://s01.de/~tox/hgexport/socket.io-java-client/io/socket/SocketIO.html)
- * [Interface IOCallback](http://s01.de/~tox/hgexport/socket.io-java-client/io/socket/IOCallback.html)
+ * [Class SocketIO](http://s01.de/~tox/socket.io-java-client/io/socket/SocketIO.html)
+ * [Interface IOCallback](http://s01.de/~tox/socket.io-java-client/io/socket/IOCallback.html)
  
 ## Checkout
 
@@ -107,7 +121,7 @@ This Library was designed with portability in mind.
 * __Android__ is fully supported.
 * __JRE__ is fully supported.
 * __GWT__ does not work at the moment, but a port would be possible.
-* __JavaME__ untested.
+* __Java ME__ does not work at the moment, but a port would be possible.
 * ... is there anything else out there?
 
 ## Testing
